@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  "name": "agente-cd-contenidos",
+  "main": "src/index.ts",
+
+  "compatibility_date": "2026-05-03",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "AgenteContenido", "class_name": "AgenteContenido" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["AgenteContenido"] }
+  ],
+
+  // Lunes, miércoles y viernes a las 9:00am hora CDMX (UTC-6) = 15:00 UTC.
+  // Ajustable — nunca correrá dos veces en menos de 24h con este cron.
+  "triggers": {
+    "crons": ["0 15 * * 1,3,5"]
+  },
+
+  "vars": {
+    "OPENAI_MODEL": "gpt-4o-mini",
+    "SITIO_WEB_BASE": "https://convergentedigital.com"
+  }
+
+  // SECRETS (no van aquí — se suben con `wrangler secret put`):
+  //   OPENAI_API_KEY        → ya lista, se sube en el deploy
+  //   MS_TENANT_ID          → pendiente (Microsoft Entra ID)
+  //   MS_CLIENT_ID          → pendiente (Microsoft Entra ID)
+  //   MS_CLIENT_SECRET      → pendiente (Microsoft Entra ID)
+  //   SHAREPOINT_SITE_ID    → pendiente
+  //   SHAREPOINT_LIST_ID    → pendiente
+  //   TEAMS_WEBHOOK_URL     → pendiente
+}
