@@ -9,13 +9,18 @@ repositorio. Léela antes de tocar código. El [README.md](./README.md) explica
 ## 1. El proyecto en 30 segundos
 
 Worker de Cloudflare que, tres veces por semana, genera un copy de LinkedIn para
-Convergente Digital: lee el sitio web de la empresa, infiere el tono de marca con
-OpenAI, elige un tema y un formato que no se hayan usado recientemente, redacta
-el post, lo guarda en una Lista de SharePoint y avisa en Teams.
+ConverGente Digital: elige un tema (servicio del portafolio) y un formato que no
+se hayan usado recientemente, redacta el post con OpenAI usando el brochure de
+marca como contexto, lo guarda en una Lista de SharePoint y avisa en Teams.
 
-**SharePoint y Teams todavía no tienen credenciales.** Están implementados y
-degradan a *no-op* sin romper nada. No los "arregles": no están rotos, están
-esperando secretos.
+**SharePoint y Teams ya tienen credenciales, en local y en producción**, y el
+agente está desplegado en
+`https://agente-cd-contenidos.ai-projects-2c4.workers.dev`. Aun así, el código
+de ambas integraciones sigue degradando a *no-op* si algún secreto llegara a
+faltar — no lo cambies a error duro.
+
+`/run` y `/state` están protegidos por el secreto `AGENT_API_TOKEN` (header
+`Authorization: Bearer <token>`); `/health` y `/` son públicos a propósito.
 
 ---
 
@@ -36,8 +41,8 @@ Para probar un cambio de extremo a extremo, con `npm run dev` corriendo en otra
 terminal:
 
 ```bash
-curl -X POST http://localhost:8787/run   # ejecuta el pipeline completo
-curl http://localhost:8787/state         # inspecciona el estado persistido
+curl -X POST -H "Authorization: Bearer $AGENT_API_TOKEN" http://localhost:8787/run
+curl -H "Authorization: Bearer $AGENT_API_TOKEN" http://localhost:8787/state
 ```
 
 ⚠️ Cada `POST /run` hace llamadas reales a OpenAI y **cuesta dinero**. No lo
@@ -53,13 +58,15 @@ scheduled() ─┐
 fetch()    ──┘         │
                        ▼
               AgenteContenido.onRequest()  → enruta / run / state / health
-                       │
+                       │                     (/run y /state exigen AGENT_API_TOKEN)
                        ▼
               AgenteContenido.runPipeline()   ← TODA la orquestación vive aquí
                        │
-   ┌───────────────────┼───────────────────┬──────────────┬────────────┐
-   ▼                   ▼                   ▼              ▼            ▼
-scrape-website   brand-voice        generate-copy   save-sharepoint  notify-teams
+              ┌────────┴────────┬──────────────┬────────────┐
+              ▼                 ▼              ▼            ▼
+        brand-context     generate-copy   save-sharepoint  notify-teams
+     (import estático,
+      sin red ni OpenAI)
 ```
 
 ### La regla estructural que hay que respetar
@@ -68,7 +75,10 @@ scrape-website   brand-voice        generate-copy   save-sharepoint  notify-team
   y el orden de los pasos. Ahí va la orquestación y la persistencia.
 - **`src/pipeline/*.ts`** son módulos independientes: reciben todo por
   parámetros (incluidas las API keys) y devuelven datos. **No importan `Agent`,
-  no leen `env`, no llaman a `setState`.**
+  no leen `env`, no llaman a `setState`.** La única excepción es
+  `brand-context.ts`, que no es una función sino datos estáticos (el brochure
+  importado como texto) — se importa directo donde se necesite, sin pasar por
+  parámetros de `runPipeline()`.
 
 Si un cambio te tienta a leer estado desde un módulo de `pipeline/`, pásalo como
 parámetro desde `runPipeline()`.
@@ -78,11 +88,10 @@ parámetro desde `runPipeline()`.
 | Archivo | Responsabilidad | Notas |
 |---|---|---|
 | `src/index.ts` | Agente, estado, rutas HTTP, cron, orquestación | Aquí están las constantes de negocio ajustables |
-| `src/pipeline/scrape-website.ts` | HTML → texto plano | Regex, sin librerías. Timeout 15 s, corta a 20 000 caracteres |
-| `src/pipeline/brand-voice.ts` | OpenAI → `BrandVoice` | `response_format: json_object`, envía 4 000 caracteres por página |
+| `src/pipeline/brand-context.ts` | Importa `context/*.md` como texto (`BRAND_CONTEXT`) + expone `SERVICIOS` | Sin red, sin OpenAI. Para actualizar tono/servicios/casos, edita el `.md`, no este archivo |
 | `src/pipeline/generate-copy.ts` | `elegirTema`, `elegirFormato`, redacción | Aquí vive el prompt de marca. Cambios aquí afectan directo al negocio |
 | `src/pipeline/save-sharepoint.ts` | Graph API client-credentials → item de Lista | Token nuevo en cada llamada (no se cachea) |
-| `src/pipeline/notify-teams.ts` | POST al webhook del canal | Nunca lanza: captura y devuelve `{ sent: false, reason }` |
+| `src/pipeline/notify-teams.ts` | POST al webhook del canal (tarjeta adaptable) | Nunca lanza: captura y devuelve `{ sent: false, reason }` |
 
 ---
 
@@ -90,40 +99,44 @@ parámetro desde `runPipeline()`.
 
 1. **Idioma.** Comentarios, prompts, mensajes de error visibles y vocabulario de
    dominio en **español neutro LATAM**. Los identificadores de dominio también
-   (`tema`, `formato`, `elegirTema`, `RUTAS_SITIO`). Los tipos y funciones de
-   infraestructura quedan en inglés (`BrandVoice`, `runPipeline`, `ScrapedPage`).
-   Es una convención mixta deliberada — **no la unifiques**.
+   (`tema`, `formato`, `elegirTema`, `SERVICIOS`). Los tipos y funciones de
+   infraestructura quedan en inglés (`runPipeline`, `GeneratedCopy`,
+   `AgentState`). Es una convención mixta deliberada — **no la unifiques**.
 2. **El prompt de `generate-copy.ts` prohíbe explícitamente** mezclar inglés en
-   el copy e inventar clientes, testimonios o cifras. Si editas ese prompt,
-   conserva esas dos reglas: son requisitos del negocio, no relleno.
+   el copy e inventar clientes, testimonios o cifras fuera de los tres casos
+   reales documentados en `context/convergente-digital-brand-reference.md`. Si
+   editas ese prompt, conserva esas reglas: son requisitos del negocio, no
+   relleno.
 3. **TypeScript `strict`** con `noUnusedLocals` y `noUnusedParameters`. Una
    variable o parámetro sin usar **rompe la compilación** — prefija con `_` si
    es inevitable (ver `_event` en `scheduled()`).
-4. **ESM puro**, sin extensión en los imports relativos (`./pipeline/brand-voice`).
+4. **ESM puro**, sin extensión en los imports relativos (`./pipeline/brand-context`),
+   salvo el import del `.md` en `brand-context.ts`, que sí lleva su extensión
+   completa (lo resuelve la regla de `wrangler.jsonc`, no Node).
 5. **Manejo de errores por capas:**
-   - *Blando* (devuelve un resultado con motivo, no lanza): scraping de una ruta,
-     Teams, SharePoint no configurado, JSON de OpenAI no parseable.
+   - *Blando* (devuelve un resultado con motivo, no lanza): Teams, SharePoint
+     no configurado, JSON de OpenAI no parseable.
    - *Duro* (lanza y marca la corrida `ok: false`): fallo de la API de OpenAI,
      fallo de autenticación de Graph, error al crear el item de SharePoint.
 
    Antes de añadir un `throw`, decide conscientemente en cuál de las dos capas
    estás.
-6. **Nada de dependencias nuevas sin necesidad real.** El scraping es regex a
-   propósito: el runtime de Workers no es Node y cada dependencia es peso y
-   riesgo de compatibilidad.
+6. **Nada de dependencias nuevas sin necesidad real.** El runtime de Workers no
+   es Node y cada dependencia es peso y riesgo de compatibilidad.
 
 ---
 
 ## 5. Reglas de negocio no obvias
 
-- El caché de tono de marca de **30 días** significa que un cambio en
-  `RUTAS_SITIO` o en el prompt de `brand-voice.ts` **no se refleja hasta que el
-  caché expire**. En local: borra `.wrangler/state/`. En producción: no hay
-  endpoint para invalidarlo (candidato razonable a mejora).
-- `elegirTema()` combina `brandVoice.servicios` (dinámico, del sitio) con dos
-  temas fijos: *desarrollo de software a medida* y *creación de agentes de IA*.
-  Esos dos están hardcodeados porque son las líneas nuevas y pueden no aparecer
-  aún en el sitio.
+- El contexto de marca es **estático y se empaqueta en build time**. Un cambio
+  en `context/convergente-digital-brand-reference.md` no se refleja hasta que
+  se corra `npm run deploy` — no hay caché que expire ni endpoint que
+  invalidar, pero tampoco hay forma de actualizarlo sin redesplegar.
+- `elegirTema()` rota sobre la constante `SERVICIOS` de `brand-context.ts` (6
+  servicios reales del portafolio, incluidos *desarrollo de software a la
+  medida* e *implementación de agentes de IA*). Si el portafolio cambia en el
+  brochure, actualiza también esta constante — no se deriva automáticamente
+  del documento.
 - Hay **5 formatos** y el historial anti-repetición mira **6 corridas**. Es
   matemáticamente imposible evitarlos todos; por eso ambos selectores reabren el
   pool completo cuando se quedan sin opciones. No es un bug.
@@ -161,9 +174,10 @@ parámetro desde `runPipeline()`.
   imprimirlas en logs o en respuestas HTTP.
 - Los secretos de producción se cargan con `npx wrangler secret put <NOMBRE>` —
   nunca en `vars`.
-- `GET /state` devuelve todo el historial sin autenticación. Si añades campos al
-  estado, ten presente que quedan expuestos públicamente cuando el Worker está
-  desplegado. Cerrar ese endpoint es la mejora #1 pendiente del README.
+- `GET /state` y `POST /run` exigen `Authorization: Bearer <AGENT_API_TOKEN>`
+  (ver `isAuthorized()` en `index.ts`). Si añades un endpoint nuevo que exponga
+  datos o dispare acciones, decide explícitamente si debe protegerse igual —
+  no asumas que queda público por defecto.
 
 ---
 
@@ -172,9 +186,11 @@ parámetro desde `runPipeline()`.
 En orden, y sin saltarse pasos:
 
 1. `npx tsc --noEmit` — obligatorio, es la única red de seguridad automática.
-2. `npm run dev` + `curl -X POST http://localhost:8787/run` — **una sola vez**,
-   y solo si el cambio afecta el pipeline en tiempo de ejecución.
-3. `curl http://localhost:8787/state` — confirmar que el estado quedó coherente.
+2. `npm run dev` + `curl -X POST -H "Authorization: Bearer $AGENT_API_TOKEN"
+   http://localhost:8787/run` — **una sola vez**, y solo si el cambio afecta el
+   pipeline en tiempo de ejecución.
+3. `curl -H "Authorization: Bearer $AGENT_API_TOKEN" http://localhost:8787/state`
+   — confirmar que el estado quedó coherente.
 4. Reportar honestamente qué se verificó y qué no. No afirmes "probado" si solo
    compilaste.
 
@@ -201,3 +217,7 @@ En orden, y sin saltarse pasos:
 - No cambiar el nombre de la clase del Durable Object sin migración.
 - No ejecutar `POST /run` repetidamente: cada llamada gasta tokens de OpenAI.
 - No hacer commit ni push salvo que se pida explícitamente.
+- No inventar servicios, casos de éxito o cifras que no estén en
+  `context/convergente-digital-brand-reference.md` — es la fuente de verdad de
+  negocio, no un placeholder de desarrollo. Si el negocio cambia, se actualiza
+  ese archivo (y `SERVICIOS` en `brand-context.ts` si aplica), no el prompt a mano.

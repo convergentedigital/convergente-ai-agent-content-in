@@ -27,8 +27,48 @@ versionado sigue [Versionado Semántico](https://semver.org/lang/es/).
   trampas conocidas, criterios de verificación y lista de "qué no hacer".
 - `CHANGELOG.md`: este archivo, como mecanismo de trazabilidad del proyecto.
 
+- `context/convergente-digital-brand-reference.md`: documento estático de
+  referencia de marca (brochure oficial 2026) con identidad, portafolio de
+  6 servicios, 3 casos de éxito reales con clientes nombrados (Stasia / SAMS
+  Panificadora, eresmariabonita.com, Latin Nails), identidad visual, tono de
+  voz y reglas explícitas de qué hacer/evitar para el agente.
+- `src/pipeline/brand-context.ts`: importa ese documento como texto plano
+  (`BRAND_CONTEXT`) y expone `SERVICIOS`, la lista de 6 temas reales del
+  portafolio usada por `elegirTema()`.
+- `src/types/markdown.d.ts`: declaración de módulo para que TypeScript
+  reconozca los imports de archivos `.md` como texto.
+- Regla de bundler en `wrangler.jsonc` (`rules: [{ type: "Text", globs:
+  ["**/*.md"], fallthrough: true }]`) para que Wrangler empaquete `.md` como
+  texto plano.
+
+### Eliminado
+
+- `src/pipeline/scrape-website.ts` y `src/pipeline/brand-voice.ts`: el agente
+  ya no lee el sitio web en vivo ni le pide a OpenAI que infiera el tono de
+  marca — esa lógica quedó reemplazada por el contexto estático de
+  `brand-context.ts`. Elimina una llamada a OpenAI por ciclo de refresco y la
+  fragilidad de depender de que ciertas rutas del sitio existan.
+- Variable `SITIO_WEB_BASE` (`wrangler.jsonc`), constantes
+  `BRAND_VOICE_MAX_AGE_DAYS` y `RUTAS_SITIO` (`src/index.ts`), y el campo
+  `brandVoice` del estado persistido — ya no aplican sin el paso de scraping.
+
 ### Cambiado
 
+- `generate-copy.ts`: `generateLinkedInCopy()` recibe ahora `brandContext:
+  string` (el documento completo) en vez de un objeto `BrandVoice` resumido, y
+  lo inyecta íntegro en el mensaje de sistema del prompt. `elegirTema()` ya no
+  recibe una lista de servicios por parámetro — rota directamente sobre la
+  constante `SERVICIOS` de `brand-context.ts`.
+- El prompt de redacción ahora autoriza citar los tres casos de éxito reales
+  del documento de marca cuando el formato es "caso de uso", en vez de exigir
+  siempre un planteamiento hipotético — manteniendo la prohibición de inventar
+  clientes, testimonios o cifras que no estén documentados.
+- `index.ts`: el pipeline pasa de 6 a 4 pasos (elegir tema/formato → redactar
+  → SharePoint → Teams); se actualizó el docstring de cabecera y los
+  comentarios `PASO N`.
+- Segundo despliegue a producción con este cambio; verificado end-to-end en
+  local y en producción (el copy generado usa correctamente "ConverGente
+  Digital" y cita servicios reales del portafolio).
 - `README.md` reescrito para servir de documentación de incorporación completa:
   diagrama del pipeline, tabla de estado por paso, endpoints HTTP, guía de
   despliegue, tabla de secretos, forma del estado persistido, pasos concretos

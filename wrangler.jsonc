@@ -23,9 +23,13 @@
   },
 
   "vars": {
-    "OPENAI_MODEL": "gpt-4o-mini",
-    "SITIO_WEB_BASE": "https://convergentedigital.com"
-  }
+    "OPENAI_MODEL": "gpt-4o-mini"
+  },
+
+  // Permite importar el documento de contexto de marca (.md) como texto plano.
+  "rules": [
+    { "type": "Text", "globs": ["**/*.md"], "fallthrough": true }
+  ]
 
   // SECRETS (no van aquí — se suben con `wrangler secret put`):
   //   OPENAI_API_KEY        → ya lista, se sube en el deploy

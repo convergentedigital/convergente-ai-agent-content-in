@@ -2,17 +2,15 @@
  * Agente de contenido para LinkedIn — Convergente Digital.
  *
  * Cada corrida:
- *  1. Analiza convergentedigital.com para refrescar el tono de marca
- *     (solo si el análisis guardado tiene más de 30 días)
- *  2. Elige un tema (servicio actual o nueva línea de negocio) y un
- *     formato, evitando repetir lo usado en las últimas corridas
- *  3. Genera el copy completo con OpenAI
- *  4. Lo guarda en la Lista de SharePoint (si ya está configurado)
- *  5. Avisa en el canal de Teams (si ya está configurado)
+ *  1. Elige un tema (servicio del portafolio) y un formato, evitando repetir
+ *     lo usado en las últimas corridas
+ *  2. Genera el copy completo con OpenAI, usando el documento estático de
+ *     contexto de marca (brand-context.ts) como fuente de verdad
+ *  3. Lo guarda en la Lista de SharePoint (si ya está configurado)
+ *  4. Avisa en el canal de Teams (si ya está configurado)
  */
 import { Agent, getAgentByName } from "agents";
-import { scrapeSitePaths } from "./pipeline/scrape-website";
-import { analyzeBrandVoice, type BrandVoice } from "./pipeline/brand-voice";
+import { BRAND_CONTEXT } from "./pipeline/brand-context";
 import { elegirTema, elegirFormato, generateLinkedInCopy } from "./pipeline/generate-copy";
 import { saveToSharePointList, sharePointConfigured } from "./pipeline/save-sharepoint";
 import { notifyTeams } from "./pipeline/notify-teams";
@@ -21,7 +19,6 @@ export type Env = {
   AgenteContenido: DurableObjectNamespace<AgenteContenido>;
 
   OPENAI_MODEL: string;
-  SITIO_WEB_BASE: string;
 
   OPENAI_API_KEY: string;
   AGENT_API_TOKEN: string;
@@ -35,15 +32,12 @@ export type Env = {
   TEAMS_WEBHOOK_URL?: string;
 };
 
-const BRAND_VOICE_MAX_AGE_DAYS = 30;
-const RUTAS_SITIO = ["/", "/servicios", "/nosotros", "/agentes-ia", "/software-a-medida"];
 const HISTORIAL_ANTIRREPETICION = 6; // no repetir tema/formato en las últimas N corridas
 const MAX_RECENT_RUNS_KEPT = 30;
 
 type AgentState = {
   lastRunAt: string | null;
   totalRunsCompleted: number;
-  brandVoice: BrandVoice | null;
   recentRuns: Array<{
     runAt: string;
     durationMs: number;
@@ -60,7 +54,6 @@ type AgentState = {
 const INITIAL_STATE: AgentState = {
   lastRunAt: null,
   totalRunsCompleted: 0,
-  brandVoice: null,
   recentRuns: [],
 };
 
@@ -96,29 +89,6 @@ export class AgenteContenido extends Agent<Env, AgentState> {
     return new Response("ok — agente de contenido Convergente Digital 🤖", { status: 200 });
   }
 
-  private async getBrandVoice(): Promise<BrandVoice> {
-    const cached = this.state.brandVoice;
-    if (cached) {
-      const ageMs = Date.now() - new Date(cached.analizadoAt).getTime();
-      const maxAgeMs = BRAND_VOICE_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
-      if (ageMs < maxAgeMs) return cached;
-    }
-
-    const pages = await scrapeSitePaths({
-      baseUrl: this.env.SITIO_WEB_BASE,
-      paths: RUTAS_SITIO,
-    });
-
-    const brandVoice = await analyzeBrandVoice({
-      pages,
-      apiKey: this.env.OPENAI_API_KEY,
-      model: this.env.OPENAI_MODEL,
-    });
-
-    this.setState({ ...this.state, brandVoice });
-    return brandVoice;
-  }
-
   async runPipeline(): Promise<{
     ok: boolean;
     durationMs: number;
@@ -137,20 +107,17 @@ export class AgenteContenido extends Agent<Env, AgentState> {
     };
 
     try {
-      // PASO 1: refrescar (o reusar) el análisis de tono de marca
-      const brandVoice = await this.getBrandVoice();
-
-      // PASO 2: elegir tema y formato evitando repetir los últimos usados
+      // PASO 1: elegir tema y formato evitando repetir los últimos usados
       const recientes = this.state.recentRuns.slice(0, HISTORIAL_ANTIRREPETICION);
       const temasRecientes = recientes.map((r) => r.tema).filter((t): t is string => Boolean(t));
       const formatosRecientes = recientes.map((r) => r.formato).filter((f): f is string => Boolean(f));
 
-      const tema = elegirTema(brandVoice.servicios, temasRecientes);
+      const tema = elegirTema(temasRecientes);
       const formato = elegirFormato(formatosRecientes);
 
-      // PASO 3: generar el copy con OpenAI
+      // PASO 2: generar el copy con OpenAI, usando el contexto estático de marca
       const generated = await generateLinkedInCopy({
-        brandVoice,
+        brandContext: BRAND_CONTEXT,
         tema,
         formato,
         apiKey: this.env.OPENAI_API_KEY,
@@ -163,7 +130,7 @@ export class AgenteContenido extends Agent<Env, AgentState> {
       runRecord.formato = formato;
       runRecord.copy = textoCompleto;
 
-      // PASO 4: guardar en SharePoint (no-op si aún no está configurado)
+      // PASO 3: guardar en SharePoint (no-op si aún no está configurado)
       const spConfig = {
         tenantId: this.env.MS_TENANT_ID,
         clientId: this.env.MS_CLIENT_ID,
@@ -189,7 +156,7 @@ export class AgenteContenido extends Agent<Env, AgentState> {
       }
       runRecord.sharePointSaved = sharePointSaved;
 
-      // PASO 5: avisar en Teams (no-op si aún no está configurado)
+      // PASO 4: avisar en Teams (no-op si aún no está configurado)
       const notifyResult = await notifyTeams({
         webhookUrl: this.env.TEAMS_WEBHOOK_URL,
         title: "🆕 Copy listo para revisar",

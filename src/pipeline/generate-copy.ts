@@ -1,9 +1,10 @@
 /**
  * Genera un copy completo, listo para publicar en LinkedIn, a partir del
- * tono de marca detectado, un tema/servicio y un formato específico.
+ * documento de contexto de marca (brand-context.ts), un tema/servicio y un
+ * formato específico.
  */
 import OpenAI from "openai";
-import type { BrandVoice } from "./brand-voice";
+import { SERVICIOS } from "./brand-context";
 
 export type GeneratedCopy = {
   tema: string;
@@ -26,22 +27,26 @@ export function elegirFormato(evitar: string[]): string {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-export function elegirTema(servicios: string[], evitar: string[]): string {
-  const temasBase = [
-    ...servicios,
-    "desarrollo de software a medida",
-    "creación de agentes de IA",
-  ];
-  const disponibles = temasBase.filter((t) => !evitar.includes(t));
-  const pool = disponibles.length > 0 ? disponibles : temasBase;
+export function elegirTema(evitar: string[]): string {
+  const disponibles = SERVICIOS.filter((t) => !evitar.includes(t));
+  const pool = disponibles.length > 0 ? disponibles : SERVICIOS;
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-const SYSTEM = `Eres el redactor de contenido de LinkedIn de una empresa de tecnología
-llamada Convergente Digital. Escribes SIEMPRE en español neutro LATAM, respetando
-el tono y estilo de marca que se te da como contexto.
+function buildSystemPrompt(brandContext: string): string {
+  return `Eres el redactor de contenido de LinkedIn de Convergente Digital. Escribes
+SIEMPRE en español neutro LATAM.
 
-Reglas del copy:
+A continuación tienes el documento oficial de referencia de marca. Básate en él
+para el tono, el portafolio de servicios, los casos reales y las reglas de qué
+hacer y qué evitar — sigue especialmente al pie de la letra su sección
+"11. Lineamientos para el agente de contenido":
+
+---
+${brandContext}
+---
+
+Reglas adicionales del copy:
 - Escrito 100% en español neutro LATAM. Nunca mezcles palabras en inglés
   (ej. nunca "unique", "insights", "feedback" — usa sus equivalentes en español).
 - Listo para publicar tal cual, sin placeholders ni corchetes.
@@ -49,42 +54,41 @@ Reglas del copy:
 - Usa saltos de línea para que sea fácil de leer en LinkedIn (párrafos cortos).
 - Termina con una llamada a la acción sutil (pregunta, invitación a comentar o a contactar).
 - No uses emojis en exceso (máximo 2-3, si aportan).
-- NUNCA inventes clientes, testimonios ni cifras de resultados específicas
-  (porcentajes, montos, nombres de empresas) que no te hayan dado como dato real.
-  Si el formato es "caso de uso", plantéalo de forma genérica e hipotética
-  ("imagina una empresa que...", "un escenario típico es...") sin presentarlo
-  como un cliente real ni inventar estadísticas concretas.
+- Si mencionas un caso de éxito o cliente real, usa ÚNICAMENTE los casos
+  documentados arriba (Stasia / SAMS Panificadora, eresmariabonita.com, Latin
+  Nails) — nunca inventes un cliente, testimonio o cifra de resultado que no
+  esté en el documento de marca.
+- Si el formato es "caso de uso o ejemplo concreto": usa uno de esos casos
+  reales si aplica al tema, o plantéalo de forma hipotética
+  ("imagina una empresa que...") si ninguno encaja — nunca presentes un caso
+  hipotético como si fuera real.
 - Devuelve SOLO un JSON con la forma exacta:
 {
   "texto": "el copy completo",
   "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3"]
 }`;
+}
 
 export async function generateLinkedInCopy(opts: {
-  brandVoice: BrandVoice;
+  brandContext: string;
   tema: string;
   formato: string;
   apiKey: string;
   model?: string;
 }): Promise<GeneratedCopy> {
-  const { brandVoice, tema, formato, apiKey, model = "gpt-4o-mini" } = opts;
+  const { brandContext, tema, formato, apiKey, model = "gpt-4o-mini" } = opts;
   const client = new OpenAI({ apiKey });
 
-  const userMsg = `Contexto de marca:
-- Tono: ${brandVoice.tono}
-- Estilo: ${brandVoice.estilo}
-- Público objetivo: ${brandVoice.publicoObjetivo}
-
-Tema de hoy: ${tema}
+  const userMsg = `Tema de hoy: ${tema}
 Formato de hoy: ${formato}
 
-Redacta el copy de LinkedIn siguiendo las reglas del sistema.`;
+Redacta el copy de LinkedIn siguiendo el documento de marca y las reglas del sistema.`;
 
   const resp = await client.chat.completions.create({
     model,
     response_format: { type: "json_object" },
     messages: [
-      { role: "system", content: SYSTEM },
+      { role: "system", content: buildSystemPrompt(brandContext) },
       { role: "user", content: userMsg },
     ],
   });

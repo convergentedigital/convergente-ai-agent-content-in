@@ -1,9 +1,10 @@
 # Agente de Contenido para LinkedIn — Convergente Digital
 
-Agente autónomo que genera copys listos para publicar en LinkedIn sobre los
-servicios de Convergente Digital (incluidas las líneas nuevas: **software a
-medida** y **agentes de IA**), respetando el tono de marca detectado
-automáticamente desde [convergentedigital.com](https://convergentedigital.com/).
+Agente autónomo que genera copys listos para publicar en LinkedIn sobre el
+portafolio de servicios de ConverGente Digital (incluidos **desarrollo de
+software a la medida** e **implementación de agentes de IA**), respetando el
+tono, los servicios y los casos de éxito reales documentados en
+[`context/convergente-digital-brand-reference.md`](context/convergente-digital-brand-reference.md).
 
 Corre solo, en la nube, tres veces por semana. No necesita servidor propio ni
 que alguien lo dispare a mano.
@@ -35,18 +36,16 @@ que alguien lo dispare a mano.
 
 | Paso del pipeline | Estado | Comentario |
 |---|---|---|
-| 1. Leer el sitio web | ✅ Funcionando | `fetch` nativo + extracción de texto, sin dependencias |
-| 2. Detectar tono de marca | ✅ Funcionando | OpenAI; el resultado se cachea 30 días |
-| 3. Elegir tema y formato | ✅ Funcionando | Anti-repetición sobre las últimas 6 corridas |
-| 4. Redactar el copy | ✅ Funcionando | OpenAI, salida JSON estructurada |
-| 5. Guardar en SharePoint | ✅ Funcionando | Verificado en local y en producción |
-| 6. Avisar en Teams | ✅ Funcionando | Verificado en local y en producción, vía Workflows (tarjeta adaptable) |
+| 1. Elegir tema y formato | ✅ Funcionando | Anti-repetición sobre las últimas 6 corridas |
+| 2. Redactar el copy | ✅ Funcionando | OpenAI + contexto estático de marca, salida JSON estructurada |
+| 3. Guardar en SharePoint | ✅ Funcionando | Verificado en local y en producción |
+| 4. Avisar en Teams | ✅ Funcionando | Verificado en local y en producción, vía Workflows (tarjeta adaptable) |
 
 **El agente ya está desplegado en producción:**
 `https://agente-cd-contenidos.ai-projects-2c4.workers.dev` — cron activo
 (lunes, miércoles y viernes, 9:00 a. m. CDMX).
 
-> **Importante:** los pasos 5 y 6 están diseñados como *degradación suave*. Si no
+> **Importante:** los pasos 3 y 4 están diseñados como *degradación suave*. Si no
 > hay credenciales, **no rompen el pipeline**: el copy se genera igual y queda
 > guardado en el estado del agente, consultable en `GET /state`.
 
@@ -57,7 +56,7 @@ que alguien lo dispare a mano.
 ### Diagrama del flujo
 
 ```
-   Cron (L/Mi/V 9:00 CDMX)          POST /run (manual)
+   Cron (L/Mi/V 9:00 CDMX)          POST /run (manual, con token)
               │                             │
               └──────────────┬──────────────┘
                              ▼
@@ -67,20 +66,16 @@ que alguien lo dispare a mano.
               │  (estado persistente SQLite) │
               └──────────────┬───────────────┘
                              ▼
-   [1] scrape-website.ts ── lee 5 rutas del sitio (HTML → texto plano)
-                             │   ↳ se salta las rutas que fallan (404, timeout)
+   [1] generate-copy.ts ─── elige tema + formato (evitando los 6 últimos)
+                             │   ↳ temas = servicios reales del portafolio
+                             ▼     (brand-context.ts)
+   [2] generate-copy.ts ─── OpenAI: redacta el copy + hashtags (JSON),
+                             │      usando brand-context.ts como contexto
+                             │      de marca (tono, servicios, casos reales)
                              ▼
-   [2] brand-voice.ts ───── OpenAI: tono, estilo, público, servicios
-                             │   ↳ CACHÉ: si el análisis tiene < 30 días se reusa
-                             ▼         y NO se vuelve a leer el sitio
-   [3] generate-copy.ts ─── elige tema + formato (evitando los 6 últimos)
-                             │
-                             ▼
-   [4] generate-copy.ts ─── OpenAI: redacta el copy + hashtags (JSON)
-                             │
               ┌──────────────┴──────────────┐
               ▼                             ▼
-   [5] save-sharepoint.ts        [6] notify-teams.ts
+   [3] save-sharepoint.ts        [4] notify-teams.ts
        Graph API (app-only)          Webhook del canal
        ⏸️ no-op sin credenciales     ⏸️ no-op sin webhook
               │                             │
@@ -89,20 +84,30 @@ que alguien lo dispare a mano.
               Se registra la corrida en `state.recentRuns`
 ```
 
+`brand-context.ts` no hace ninguna llamada externa: importa como texto plano
+`context/convergente-digital-brand-reference.md` (el brochure corporativo) y
+expone la lista de servicios reales del portafolio para rotar temas. Antes de
+este cambio, el paso 1 leía el sitio web en vivo y un segundo paso llamaba a
+OpenAI para inferir el tono — ver el CHANGELOG para el detalle de ese
+reemplazo.
+
 ### Decisiones de diseño que conviene conocer
 
 - **Una sola instancia del agente.** `getAgentByName(env.AgenteContenido, "default")`
-  siempre resuelve al mismo Durable Object. Todo el historial y el tono de marca
-  viven ahí. Es intencional: es un agente único para toda la empresa, no uno por
-  usuario.
-- **El tono de marca se cachea 30 días** (`BRAND_VOICE_MAX_AGE_DAYS` en
-  `src/index.ts`). Evita releer el sitio y pagar tokens en cada corrida.
+  siempre resuelve al mismo Durable Object. Todo el historial vive ahí. Es
+  intencional: es un agente único para toda la empresa, no uno por usuario.
+- **El contexto de marca es estático, no se cachea ni expira.** Vive en
+  `context/convergente-digital-brand-reference.md` y se importa como texto en
+  build time (`src/pipeline/brand-context.ts`). Para actualizar el tono, los
+  servicios o los casos de éxito, se edita ese archivo — no hace falta tocar
+  código ni redesplegar por vencimiento de caché (si se cambia el archivo, sí
+  hay que redesplegar para que el Worker lo recoja).
 - **Anti-repetición por historial.** Se miran las últimas 6 corridas
   (`HISTORIAL_ANTIRREPETICION`) y se excluyen esos temas y formatos. Si ya no
   quedan opciones disponibles, se reabre el pool completo en vez de fallar.
-- **Errores blandos vs. errores duros.** El scraping de una ruta, SharePoint y
-  Teams degradan suavemente (devuelven `false` + un motivo). Un fallo de OpenAI sí
-  marca la corrida como `ok: false` y queda registrado con su mensaje de error.
+- **Errores blandos vs. errores duros.** SharePoint y Teams degradan
+  suavemente (devuelven `false` + un motivo). Un fallo de OpenAI sí marca la
+  corrida como `ok: false` y queda registrado con su mensaje de error.
 - **Sin base de datos externa.** Todo el estado vive en el SQLite del Durable Object.
 
 ---
@@ -159,7 +164,7 @@ curl -H "Authorization: Bearer <token>" http://localhost:8787/state
 ```
 
 > El estado local se guarda en `.wrangler/state/`. Bórralo si quieres empezar
-> de cero (por ejemplo, para forzar un re-análisis del tono de marca).
+> de cero (por ejemplo, para limpiar el historial de corridas).
 
 ### Verificar que el código compila
 
@@ -195,7 +200,7 @@ Respuesta típica de `POST /run`:
 {
   "ok": true,
   "durationMs": 8421,
-  "tema": "creación de agentes de IA",
+  "tema": "implementación de agentes de IA",
   "formato": "caso de uso o ejemplo concreto",
   "copy": "Texto completo del post...\n\n#IA #Automatizacion #Software",
   "sharePointSaved": false,
@@ -240,8 +245,7 @@ npx wrangler tail
 
 | Variable | Valor actual | Para qué sirve |
 |---|---|---|
-| `OPENAI_MODEL` | `gpt-4o-mini` | Modelo usado tanto para el análisis de marca como para el copy |
-| `SITIO_WEB_BASE` | `https://convergentedigital.com` | Base sobre la que se resuelven las rutas a leer |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Modelo usado para redactar el copy |
 
 ### Secretos (nunca en el repo)
 
@@ -249,7 +253,7 @@ Local → `.dev.vars` · Producción → `npx wrangler secret put <NOMBRE>`
 
 | Secreto | Estado | Usado por |
 |---|---|---|
-| `OPENAI_API_KEY` | ✅ Configurado (local + producción) | `brand-voice.ts`, `generate-copy.ts` |
+| `OPENAI_API_KEY` | ✅ Configurado (local + producción) | `generate-copy.ts` |
 | `AGENT_API_TOKEN` | ✅ Configurado (local + producción) | `index.ts` — protege `/run` y `/state` |
 | `MS_TENANT_ID` | ✅ Configurado (local + producción) | `save-sharepoint.ts` |
 | `MS_CLIENT_ID` | ✅ Configurado (local + producción) | `save-sharepoint.ts` |
@@ -278,14 +282,13 @@ miércoles y viernes.
 Para cambiar la frecuencia, edita `wrangler.jsonc` y vuelve a desplegar.
 Los crons de Cloudflare se expresan **siempre en UTC**.
 
-### Constantes ajustables (`src/index.ts`)
+### Constantes ajustables
 
-| Constante | Valor | Efecto |
-|---|---|---|
-| `BRAND_VOICE_MAX_AGE_DAYS` | `30` | Cada cuánto se re-analiza el sitio web |
-| `RUTAS_SITIO` | 5 rutas | Qué páginas se leen para inferir el tono |
-| `HISTORIAL_ANTIRREPETICION` | `6` | Cuántas corridas atrás se miran para no repetir |
-| `MAX_RECENT_RUNS_KEPT` | `30` | Cuántas corridas se conservan en el estado |
+| Constante | Archivo | Valor | Efecto |
+|---|---|---|---|
+| `HISTORIAL_ANTIRREPETICION` | `src/index.ts` | `6` | Cuántas corridas atrás se miran para no repetir |
+| `MAX_RECENT_RUNS_KEPT` | `src/index.ts` | `30` | Cuántas corridas se conservan en el estado |
+| `SERVICIOS` | `src/pipeline/brand-context.ts` | 6 servicios | Lista de temas entre los que rota `elegirTema()` |
 
 ---
 
@@ -297,13 +300,6 @@ Forma de `state` (lo que devuelve `GET /state`):
 {
   lastRunAt: string | null;          // ISO de la última corrida (exitosa o no)
   totalRunsCompleted: number;        // solo cuenta las exitosas
-  brandVoice: {
-    tono: string;
-    estilo: string;
-    publicoObjetivo: string;
-    servicios: string[];             // alimenta la lista de temas posibles
-    analizadoAt: string;             // ISO — base del caché de 30 días
-  } | null;
   recentRuns: Array<{                // más reciente primero, máximo 30
     runAt: string;
     durationMs: number;
@@ -325,7 +321,7 @@ quedan los copys generados**. Guárdalos manualmente si los vas a usar.
 
 ## 8. Completar las integraciones pendientes
 
-### 8.1 SharePoint (paso 5)
+### 8.1 SharePoint (paso 3)
 
 1. **Registrar la app** en Microsoft Entra ID del tenant de Convergente Digital
    (Azure Portal → Entra ID → App registrations → New registration).
@@ -350,7 +346,7 @@ quedan los copys generados**. Guárdalos manualmente si los vas a usar.
 
 6. Subir los cinco secretos con `wrangler secret put` y redesplegar.
 
-### 8.2 Teams (paso 6)
+### 8.2 Teams (paso 4)
 
 1. En el canal de Teams destino: **Workflows** → plantilla
    *"Enviar alertas de webhook a un canal"* ("Post to a channel when a webhook
@@ -368,15 +364,18 @@ El mensaje se envía como una **tarjeta adaptable (Adaptive Card)** envuelta en
 
 ```
 agente-cd-contenidos/
+├── context/
+│   └── convergente-digital-brand-reference.md  # Brochure — fuente de verdad de marca
 ├── src/
 │   ├── index.ts                  # Agente + orquestación del pipeline + rutas HTTP + cron
+│   ├── types/
+│   │   └── markdown.d.ts         # Declaración de tipos para imports de .md como texto
 │   └── pipeline/
-│       ├── scrape-website.ts     # HTML → texto plano (sin dependencias)
-│       ├── brand-voice.ts        # OpenAI → tono, estilo, público, servicios
+│       ├── brand-context.ts      # Importa el brochure + lista de servicios (SERVICIOS)
 │       ├── generate-copy.ts      # Selección de tema/formato + redacción del copy
 │       ├── save-sharepoint.ts    # Microsoft Graph (client credentials) → Lista
 │       └── notify-teams.ts       # Webhook del canal de Teams
-├── wrangler.jsonc                # Config del Worker: DO, cron, vars
+├── wrangler.jsonc                # Config del Worker: DO, cron, vars, regla de import de .md
 ├── tsconfig.json                 # TS strict, target es2021, tipos de Workers
 ├── package.json
 ├── CLAUDE.md                     # Guía para agentes de IA que trabajen en este repo
@@ -397,16 +396,15 @@ Ordenadas por prioridad sugerida:
 
 | # | Tema | Detalle | Sugerencia |
 |---|---|---|---|
-| 1 | **Sin tests** | `npm test` está sin implementar | `vitest` + `@cloudflare/vitest-pool-workers`; empezar por `elegirTema`/`elegirFormato` y los extractores de `scrape-website.ts`, que son funciones puras |
+| 1 | **Sin tests** | `npm test` está sin implementar | `vitest` + `@cloudflare/vitest-pool-workers`; empezar por `elegirTema`/`elegirFormato`, que son funciones puras |
 | 2 | **Los fallos son silenciosos** | Si OpenAI falla, no se notifica a nadie: solo queda en `state.recentRuns[0].error` | Enviar a Teams también desde el `catch` del pipeline |
 | 3 | **Errores del cron se tragan** | `scheduled()` usa `ctx.waitUntil(...)` sin capturar el resultado | Añadir `.catch()` con `console.error` |
 | 4 | **Observabilidad no declarada** | `wrangler.jsonc` no incluye `observability` | Agregar `"observability": { "enabled": true }` |
 | 5 | **El estado crece** | 30 corridas × copy completo se serializan enteras en cada `setState` | Recortar `copy` en el historial una vez que SharePoint sea la fuente de verdad |
-| 6 | **Rutas del sitio fijas en código** | `/agentes-ia` y `/software-a-medida` pueden no existir y se saltan sin avisar | Registrar en el estado qué rutas respondieron |
-| 7 | **Sin guarda de idempotencia** | La no-repetición diaria depende solo del cron; dos `POST /run` seguidos generan dos copys | Agregar una comprobación sobre `lastRunAt` si se requiere |
-| 8 | **Referencia rota** | `save-sharepoint.ts` menciona `walkthroughs/06-microsoft-graph.md`, que no existe en el repo | Crear el documento o apuntar a la sección 8.1 de este README |
-| 9 | **Modelo único** | Se usa `gpt-4o-mini` tanto para analizar como para redactar | Considerar un modelo más capaz solo para el copy final |
-| 10 | **Token único sin rotación** | `AGENT_API_TOKEN` es un solo secreto compartido; si se filtra hay que rotarlo a mano | Documentar el procedimiento de rotación, o pasar a Cloudflare Access si el equipo crece |
+| 6 | **Sin guarda de idempotencia** | La no-repetición diaria depende solo del cron; dos `POST /run` seguidos generan dos copys | Agregar una comprobación sobre `lastRunAt` si se requiere |
+| 7 | **Referencia rota** | `save-sharepoint.ts` menciona `walkthroughs/06-microsoft-graph.md`, que no existe en el repo | Crear el documento o apuntar a la sección 8.1 de este README |
+| 8 | **Token único sin rotación** | `AGENT_API_TOKEN` es un solo secreto compartido; si se filtra hay que rotarlo a mano | Documentar el procedimiento de rotación, o pasar a Cloudflare Access si el equipo crece |
+| 9 | **Contexto de marca desactualizable en silencio** | Si el brochure cambia (nuevo servicio, nuevo caso de éxito) y nadie actualiza `context/convergente-digital-brand-reference.md`, el agente sigue generando contenido con datos viejos, sin ninguna alerta | Revisar el documento periódicamente como parte del mantenimiento del agente |
 
 ---
 
@@ -414,13 +412,13 @@ Ordenadas por prioridad sugerida:
 
 | Síntoma | Causa probable | Qué hacer |
 |---|---|---|
+| `POST /run` o `GET /state` devuelven `401 Unauthorized` | Falta el header `Authorization` o el token no coincide con `AGENT_API_TOKEN` | Revisar el header enviado; ver [sección 4](#4-endpoints-http) |
 | `POST /run` devuelve `ok: false` con error de OpenAI | API key inválida o sin saldo | Verificar la key y el saldo de la cuenta |
 | El copy sale vacío (`texto: ""`) | El modelo no devolvió JSON parseable | Revisar el prompt en `generate-copy.ts`; el código cae a `""` sin lanzar excepción |
-| `servicios` viene vacío en `brandVoice` | El scraping no obtuvo contenido útil | Verificar que `SITIO_WEB_BASE` responde y que las rutas existen. Con `servicios: []` el agente sigue funcionando, pero solo rota entre 2 temas base |
-| Siempre genera el mismo tema | `brandVoice.servicios` vacío + poco historial | Ver la fila anterior |
-| `sharePointSaved: false` siempre | Falta alguno de los 5 secretos de Microsoft | Ver [sección 8.1](#81-sharepoint-paso-5) |
+| Siempre genera el mismo tema | Poco historial en `recentRuns` (agente recién desplegado) | Es esperado al inicio; con más corridas el anti-repetición empieza a rotar sobre los 6 servicios de `SERVICIOS` |
+| `sharePointSaved: false` siempre | Falta alguno de los 5 secretos de Microsoft | Ver [sección 8.1](#81-sharepoint-paso-3) |
 | El cron no dispara | El Worker no está desplegado, o el cron se editó sin redesplegar | `npm run deploy` y revisar el dashboard de Cloudflare → Workers → Triggers |
-| Cambios en el tono de marca no se reflejan | El análisis cacheado tiene menos de 30 días | Borrar `.wrangler/state/` (local) o bajar temporalmente `BRAND_VOICE_MAX_AGE_DAYS` |
+| Cambios al brochure de marca no se reflejan | El Worker no se redesplegó después de editar `context/convergente-digital-brand-reference.md` | `npm run deploy` — el archivo se empaqueta en build time, no se lee en runtime |
 
 ---
 
@@ -430,7 +428,7 @@ Ordenadas por prioridad sugerida:
   comentarios, nombres de variables de dominio (`tema`, `formato`, `elegirTema`)
   y los prompts. Es una regla explícita del negocio, no una preferencia estética.
 - Los nombres técnicos de infraestructura y de los tipos siguen en inglés
-  (`runPipeline`, `BrandVoice`, `ScrapedPage`) — es la convención mixta ya
+  (`runPipeline`, `GeneratedCopy`, `AgentState`) — es la convención mixta ya
   establecida; respétala en vez de unificar.
 - TypeScript en modo `strict`, con `noUnusedLocals` y `noUnusedParameters`
   activos: el código sin usar **rompe la compilación**.
