@@ -34,6 +34,12 @@ versionado sigue [Versionado Semántico](https://semver.org/lang/es/).
   despliegue, tabla de secretos, forma del estado persistido, pasos concretos
   para habilitar SharePoint y Teams, tabla de limitaciones conocidas priorizada y
   sección de solución de problemas.
+- Integración de SharePoint (paso 5 del pipeline) configurada y verificada en
+  local: app registrada en Microsoft Entra ID (`Sites.Selected` con acceso
+  otorgado solo al sitio `ContenidoRedesConvergente`), Lista `CopysLinkedIn`
+  creada con las columnas esperadas, y corrida de prueba confirmando
+  `sharePointSaved: true`. Los 5 secretos de Microsoft quedan en `.dev.vars`;
+  falta subirlos a producción con `wrangler secret put`.
 
 ---
 
