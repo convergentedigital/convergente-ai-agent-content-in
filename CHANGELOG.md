@@ -43,8 +43,12 @@ versionado sigue [Versionado Semántico](https://semver.org/lang/es/).
   canal `Contenido Redes` creado en el equipo `CONVERGENTE DIGITAL SAS`, flujo
   de Workflows "Enviar alertas de webhook a un canal" conectado, y corrida de
   prueba confirmando `teamsNotified: true`.
-- Los 6 secretos (Microsoft + Teams) quedan en `.dev.vars`; falta subirlos a
-  producción con `wrangler secret put` antes de desplegar.
+- Los 6 secretos (OpenAI + Microsoft + Teams) subidos a producción con
+  `wrangler secret put`.
+- **Primer despliegue a producción**:
+  `https://agente-cd-contenidos.ai-projects-2c4.workers.dev`, con el cron
+  `0 15 * * 1,3,5` activo. Las 6 etapas del pipeline funcionan de punta a punta
+  tanto en local como en producción.
 
 ### Corregido
 

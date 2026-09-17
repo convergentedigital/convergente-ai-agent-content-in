@@ -39,8 +39,12 @@ que alguien lo dispare a mano.
 | 2. Detectar tono de marca | ✅ Funcionando | OpenAI; el resultado se cachea 30 días |
 | 3. Elegir tema y formato | ✅ Funcionando | Anti-repetición sobre las últimas 6 corridas |
 | 4. Redactar el copy | ✅ Funcionando | OpenAI, salida JSON estructurada |
-| 5. Guardar en SharePoint | ✅ Funcionando | Configurado y probado en local (`sharePointSaved: true`); falta subir los secretos a producción |
-| 6. Avisar en Teams | ✅ Funcionando | Configurado y probado en local (`teamsNotified: true`) vía Workflows (tarjeta adaptable); falta subir el secreto a producción |
+| 5. Guardar en SharePoint | ✅ Funcionando | Verificado en local y en producción |
+| 6. Avisar en Teams | ✅ Funcionando | Verificado en local y en producción, vía Workflows (tarjeta adaptable) |
+
+**El agente ya está desplegado en producción:**
+`https://agente-cd-contenidos.ai-projects-2c4.workers.dev` — cron activo
+(lunes, miércoles y viernes, 9:00 a. m. CDMX).
 
 > **Importante:** los pasos 5 y 6 están diseñados como *degradación suave*. Si no
 > hay credenciales, **no rompen el pipeline**: el copy se genera igual y queda
@@ -232,17 +236,16 @@ Local → `.dev.vars` · Producción → `npx wrangler secret put <NOMBRE>`
 | Secreto | Estado | Usado por |
 |---|---|---|
 | `OPENAI_API_KEY` | ✅ Configurado (local + producción) | `brand-voice.ts`, `generate-copy.ts` |
-| `MS_TENANT_ID` | ✅ Configurado (solo local) | `save-sharepoint.ts` |
-| `MS_CLIENT_ID` | ✅ Configurado (solo local) | `save-sharepoint.ts` |
-| `MS_CLIENT_SECRET` | ✅ Configurado (solo local) | `save-sharepoint.ts` |
-| `SHAREPOINT_SITE_ID` | ✅ Configurado (solo local) | `save-sharepoint.ts` |
-| `SHAREPOINT_LIST_ID` | ✅ Configurado (solo local) | `save-sharepoint.ts` |
-| `TEAMS_WEBHOOK_URL` | ✅ Configurado (solo local) | `notify-teams.ts` |
+| `MS_TENANT_ID` | ✅ Configurado (local + producción) | `save-sharepoint.ts` |
+| `MS_CLIENT_ID` | ✅ Configurado (local + producción) | `save-sharepoint.ts` |
+| `MS_CLIENT_SECRET` | ✅ Configurado (local + producción) | `save-sharepoint.ts` |
+| `SHAREPOINT_SITE_ID` | ✅ Configurado (local + producción) | `save-sharepoint.ts` |
+| `SHAREPOINT_LIST_ID` | ✅ Configurado (local + producción) | `save-sharepoint.ts` |
+| `TEAMS_WEBHOOK_URL` | ✅ Configurado (local + producción) | `notify-teams.ts` |
 
-Los seis secretos están cargados en `.dev.vars` y verificados con una corrida
-local (`sharePointSaved: true`, `teamsNotified: true`). Todavía no se subieron a
-producción con `wrangler secret put` — eso se hace en el paso de despliegue
-(sección 5).
+Los seis secretos están cargados en `.dev.vars` y subidos a producción con
+`wrangler secret put`. Verificados con corridas reales en ambos entornos
+(`sharePointSaved: true`, `teamsNotified: true`).
 
 Los cinco de SharePoint son **todo o nada**: si falta uno, `sharePointConfigured()`
 devuelve `false` y el paso se salta silenciosamente.
