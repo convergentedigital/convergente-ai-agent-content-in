@@ -49,6 +49,13 @@ versionado sigue [Versionado Semántico](https://semver.org/lang/es/).
   `https://agente-cd-contenidos.ai-projects-2c4.workers.dev`, con el cron
   `0 15 * * 1,3,5` activo. Las 6 etapas del pipeline funcionan de punta a punta
   tanto en local como en producción.
+- **Autenticación por token compartido** en `/run` y `/state`: nuevo secreto
+  `AGENT_API_TOKEN`, verificado en `onRequest` vía header
+  `Authorization: Bearer <token>`; responden `401` sin token o con uno
+  incorrecto. El disparo interno del cron en `scheduled()` manda el header
+  automáticamente. `/health` y `/` se dejan públicos a propósito (no exponen
+  datos sensibles). Resuelve el punto #1 de "Limitaciones conocidas" del
+  README, verificado en local y en producción.
 
 ### Corregido
 

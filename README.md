@@ -127,6 +127,7 @@ Crea el archivo `.dev.vars` en la raíz (**no se commitea**, ya está en `.gitig
 
 ```ini
 OPENAI_API_KEY=sk-...
+AGENT_API_TOKEN=cualquier-cadena-larga-y-aleatoria
 # Opcionales — cuando estén disponibles:
 # MS_TENANT_ID=
 # MS_CLIENT_ID=
@@ -145,15 +146,16 @@ npm run dev     # queda escuchando en http://localhost:8787
 Y en **otra terminal**, dispara una corrida:
 
 ```powershell
-# PowerShell (Windows)
-Invoke-WebRequest -Method Post -Uri http://localhost:8787/run | Select-Object -Expand Content
-Invoke-WebRequest -Uri http://localhost:8787/state | Select-Object -Expand Content
+# PowerShell (Windows) — reemplaza <token> por el valor de AGENT_API_TOKEN
+$headers = @{ Authorization = "Bearer <token>" }
+Invoke-WebRequest -Method Post -Uri http://localhost:8787/run -Headers $headers | Select-Object -Expand Content
+Invoke-WebRequest -Uri http://localhost:8787/state -Headers $headers | Select-Object -Expand Content
 ```
 
 ```bash
-# bash / Git Bash
-curl -X POST http://localhost:8787/run
-curl http://localhost:8787/state
+# bash / Git Bash — reemplaza <token> por el valor de AGENT_API_TOKEN
+curl -X POST -H "Authorization: Bearer <token>" http://localhost:8787/run
+curl -H "Authorization: Bearer <token>" http://localhost:8787/state
 ```
 
 > El estado local se guarda en `.wrangler/state/`. Bórralo si quieres empezar
@@ -169,12 +171,23 @@ npx tsc --noEmit
 
 ## 4. Endpoints HTTP
 
-| Método | Ruta | Qué hace |
-|---|---|---|
-| `POST` | `/run` | Ejecuta el pipeline completo ahora y devuelve el resultado de la corrida |
-| `GET` | `/state` | Devuelve el estado completo: tono de marca cacheado + últimas 30 corridas (con sus copys) |
-| `GET` | `/health` | Chequeo rápido: `status`, `lastRunAt`, `totalRunsCompleted` |
-| `GET` | `/` | Mensaje de vida (`"ok — agente de contenido..."`) |
+| Método | Ruta | Auth | Qué hace |
+|---|---|---|---|
+| `POST` | `/run` | 🔒 Requiere token | Ejecuta el pipeline completo ahora y devuelve el resultado de la corrida |
+| `GET` | `/state` | 🔒 Requiere token | Devuelve el estado completo: tono de marca cacheado + últimas 30 corridas (con sus copys) |
+| `GET` | `/health` | Público | Chequeo rápido: `status`, `lastRunAt`, `totalRunsCompleted` |
+| `GET` | `/` | Público | Mensaje de vida (`"ok — agente de contenido..."`) |
+
+`/run` y `/state` exponen datos sensibles o gastan tokens de OpenAI, así que
+exigen el header:
+
+```
+Authorization: Bearer <AGENT_API_TOKEN>
+```
+
+Sin el header, o con un valor incorrecto, responden `401 Unauthorized`. El cron
+interno (`scheduled()`) manda este header automáticamente; no hace falta
+configurarlo aparte para las corridas programadas.
 
 Respuesta típica de `POST /run`:
 
@@ -190,9 +203,6 @@ Respuesta típica de `POST /run`:
 }
 ```
 
-> ⚠️ **Estos endpoints hoy no tienen autenticación.** Ver
-> [Limitaciones conocidas](#10-limitaciones-conocidas-y-próximos-pasos).
-
 ---
 
 ## 5. Despliegue a producción
@@ -203,6 +213,8 @@ npx wrangler login
 
 # 2. Cargar los secretos (uno por uno; pide el valor de forma interactiva)
 npx wrangler secret put OPENAI_API_KEY
+npx wrangler secret put AGENT_API_TOKEN
+# + los de SharePoint/Teams cuando estén disponibles (ver sección 8)
 
 # 3. Publicar
 npm run deploy
@@ -211,6 +223,8 @@ npm run deploy
 Al terminar, wrangler imprime la URL pública
 (`https://agente-cd-contenidos.<subdominio>.workers.dev`). A partir de ese
 momento el cron queda activo automáticamente.
+
+**Ya desplegado:** `https://agente-cd-contenidos.ai-projects-2c4.workers.dev`
 
 Ver logs en vivo:
 
@@ -236,6 +250,7 @@ Local → `.dev.vars` · Producción → `npx wrangler secret put <NOMBRE>`
 | Secreto | Estado | Usado por |
 |---|---|---|
 | `OPENAI_API_KEY` | ✅ Configurado (local + producción) | `brand-voice.ts`, `generate-copy.ts` |
+| `AGENT_API_TOKEN` | ✅ Configurado (local + producción) | `index.ts` — protege `/run` y `/state` |
 | `MS_TENANT_ID` | ✅ Configurado (local + producción) | `save-sharepoint.ts` |
 | `MS_CLIENT_ID` | ✅ Configurado (local + producción) | `save-sharepoint.ts` |
 | `MS_CLIENT_SECRET` | ✅ Configurado (local + producción) | `save-sharepoint.ts` |
@@ -382,16 +397,16 @@ Ordenadas por prioridad sugerida:
 
 | # | Tema | Detalle | Sugerencia |
 |---|---|---|---|
-| 1 | **Endpoints sin autenticación** | Cualquiera con la URL pública puede llamar `POST /run` (gasta tokens de OpenAI) y leer `GET /state` (expone todos los copys) | Validar un token compartido en `onRequest`, o proteger con Cloudflare Access |
-| 2 | **Sin tests** | `npm test` está sin implementar | `vitest` + `@cloudflare/vitest-pool-workers`; empezar por `elegirTema`/`elegirFormato` y los extractores de `scrape-website.ts`, que son funciones puras |
-| 3 | **Los fallos son silenciosos** | Si OpenAI falla, no se notifica a nadie: solo queda en `state.recentRuns[0].error` | Enviar a Teams también desde el `catch` del pipeline |
-| 4 | **Errores del cron se tragan** | `scheduled()` usa `ctx.waitUntil(...)` sin capturar el resultado | Añadir `.catch()` con `console.error` |
-| 5 | **Observabilidad no declarada** | `wrangler.jsonc` no incluye `observability` | Agregar `"observability": { "enabled": true }` |
-| 6 | **El estado crece** | 30 corridas × copy completo se serializan enteras en cada `setState` | Recortar `copy` en el historial una vez que SharePoint sea la fuente de verdad |
-| 7 | **Rutas del sitio fijas en código** | `/agentes-ia` y `/software-a-medida` pueden no existir y se saltan sin avisar | Registrar en el estado qué rutas respondieron |
-| 8 | **Sin guarda de idempotencia** | La no-repetición diaria depende solo del cron; dos `POST /run` seguidos generan dos copys | Agregar una comprobación sobre `lastRunAt` si se requiere |
-| 9 | **Referencia rota** | `save-sharepoint.ts` menciona `walkthroughs/06-microsoft-graph.md`, que no existe en el repo | Crear el documento o apuntar a la sección 8.1 de este README |
-| 10 | **Modelo único** | Se usa `gpt-4o-mini` tanto para analizar como para redactar | Considerar un modelo más capaz solo para el copy final |
+| 1 | **Sin tests** | `npm test` está sin implementar | `vitest` + `@cloudflare/vitest-pool-workers`; empezar por `elegirTema`/`elegirFormato` y los extractores de `scrape-website.ts`, que son funciones puras |
+| 2 | **Los fallos son silenciosos** | Si OpenAI falla, no se notifica a nadie: solo queda en `state.recentRuns[0].error` | Enviar a Teams también desde el `catch` del pipeline |
+| 3 | **Errores del cron se tragan** | `scheduled()` usa `ctx.waitUntil(...)` sin capturar el resultado | Añadir `.catch()` con `console.error` |
+| 4 | **Observabilidad no declarada** | `wrangler.jsonc` no incluye `observability` | Agregar `"observability": { "enabled": true }` |
+| 5 | **El estado crece** | 30 corridas × copy completo se serializan enteras en cada `setState` | Recortar `copy` en el historial una vez que SharePoint sea la fuente de verdad |
+| 6 | **Rutas del sitio fijas en código** | `/agentes-ia` y `/software-a-medida` pueden no existir y se saltan sin avisar | Registrar en el estado qué rutas respondieron |
+| 7 | **Sin guarda de idempotencia** | La no-repetición diaria depende solo del cron; dos `POST /run` seguidos generan dos copys | Agregar una comprobación sobre `lastRunAt` si se requiere |
+| 8 | **Referencia rota** | `save-sharepoint.ts` menciona `walkthroughs/06-microsoft-graph.md`, que no existe en el repo | Crear el documento o apuntar a la sección 8.1 de este README |
+| 9 | **Modelo único** | Se usa `gpt-4o-mini` tanto para analizar como para redactar | Considerar un modelo más capaz solo para el copy final |
+| 10 | **Token único sin rotación** | `AGENT_API_TOKEN` es un solo secreto compartido; si se filtra hay que rotarlo a mano | Documentar el procedimiento de rotación, o pasar a Cloudflare Access si el equipo crece |
 
 ---
 

@@ -24,6 +24,7 @@ export type Env = {
   SITIO_WEB_BASE: string;
 
   OPENAI_API_KEY: string;
+  AGENT_API_TOKEN: string;
 
   // Pendientes hasta tener el registro en Microsoft Entra ID:
   MS_TENANT_ID?: string;
@@ -68,6 +69,12 @@ export class AgenteContenido extends Agent<Env, AgentState> {
 
   async onRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
+
+    if (url.pathname === "/run" || url.pathname === "/state") {
+      if (!isAuthorized(req, this.env.AGENT_API_TOKEN)) {
+        return new Response("No autorizado", { status: 401 });
+      }
+    }
 
     if (url.pathname === "/run" && req.method === "POST") {
       const result = await this.runPipeline();
@@ -226,7 +233,15 @@ export default {
 
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     const agent = await getAgentByName(env.AgenteContenido, "default");
-    const internalReq = new Request("https://agent.internal/run", { method: "POST" });
+    const internalReq = new Request("https://agent.internal/run", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.AGENT_API_TOKEN}` },
+    });
     ctx.waitUntil(agent.fetch(internalReq).then((r) => r.text()));
   },
 };
+
+function isAuthorized(req: Request, token: string | undefined): boolean {
+  if (!token) return false;
+  return req.headers.get("Authorization") === `Bearer ${token}`;
+}
