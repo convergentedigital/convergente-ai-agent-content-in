@@ -39,7 +39,7 @@ que alguien lo dispare a mano.
 | 2. Detectar tono de marca | ✅ Funcionando | OpenAI; el resultado se cachea 30 días |
 | 3. Elegir tema y formato | ✅ Funcionando | Anti-repetición sobre las últimas 6 corridas |
 | 4. Redactar el copy | ✅ Funcionando | OpenAI, salida JSON estructurada |
-| 5. Guardar en SharePoint | ⏸️ Pendiente | Falta el registro de app en Microsoft Entra ID |
+| 5. Guardar en SharePoint | ✅ Funcionando | Configurado y probado en local (`sharePointSaved: true`); falta subir los secretos a producción |
 | 6. Avisar en Teams | ⏸️ Pendiente | Falta la URL del webhook del canal |
 
 > **Importante:** los pasos 5 y 6 están diseñados como *degradación suave*. Si no
@@ -231,13 +231,17 @@ Local → `.dev.vars` · Producción → `npx wrangler secret put <NOMBRE>`
 
 | Secreto | Estado | Usado por |
 |---|---|---|
-| `OPENAI_API_KEY` | ✅ Configurado | `brand-voice.ts`, `generate-copy.ts` |
-| `MS_TENANT_ID` | ⏸️ Pendiente | `save-sharepoint.ts` |
-| `MS_CLIENT_ID` | ⏸️ Pendiente | `save-sharepoint.ts` |
-| `MS_CLIENT_SECRET` | ⏸️ Pendiente | `save-sharepoint.ts` |
-| `SHAREPOINT_SITE_ID` | ⏸️ Pendiente | `save-sharepoint.ts` |
-| `SHAREPOINT_LIST_ID` | ⏸️ Pendiente | `save-sharepoint.ts` |
+| `OPENAI_API_KEY` | ✅ Configurado (local + producción) | `brand-voice.ts`, `generate-copy.ts` |
+| `MS_TENANT_ID` | ✅ Configurado (solo local) | `save-sharepoint.ts` |
+| `MS_CLIENT_ID` | ✅ Configurado (solo local) | `save-sharepoint.ts` |
+| `MS_CLIENT_SECRET` | ✅ Configurado (solo local) | `save-sharepoint.ts` |
+| `SHAREPOINT_SITE_ID` | ✅ Configurado (solo local) | `save-sharepoint.ts` |
+| `SHAREPOINT_LIST_ID` | ✅ Configurado (solo local) | `save-sharepoint.ts` |
 | `TEAMS_WEBHOOK_URL` | ⏸️ Pendiente | `notify-teams.ts` |
+
+Los cinco secretos de Microsoft están cargados en `.dev.vars` y verificados con una
+corrida local (`sharePointSaved: true`). Todavía no se subieron a producción con
+`wrangler secret put` — eso se hace en el paso de despliegue (sección 5).
 
 Los cinco de SharePoint son **todo o nada**: si falta uno, `sharePointConfigured()`
 devuelve `false` y el paso se salta silenciosamente.
