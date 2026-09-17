@@ -38,8 +38,20 @@ versionado sigue [Versionado Semántico](https://semver.org/lang/es/).
   local: app registrada en Microsoft Entra ID (`Sites.Selected` con acceso
   otorgado solo al sitio `ContenidoRedesConvergente`), Lista `CopysLinkedIn`
   creada con las columnas esperadas, y corrida de prueba confirmando
-  `sharePointSaved: true`. Los 5 secretos de Microsoft quedan en `.dev.vars`;
-  falta subirlos a producción con `wrangler secret put`.
+  `sharePointSaved: true`.
+- Integración de Teams (paso 6 del pipeline) configurada y verificada en local:
+  canal `Contenido Redes` creado en el equipo `CONVERGENTE DIGITAL SAS`, flujo
+  de Workflows "Enviar alertas de webhook a un canal" conectado, y corrida de
+  prueba confirmando `teamsNotified: true`.
+- Los 6 secretos (Microsoft + Teams) quedan en `.dev.vars`; falta subirlos a
+  producción con `wrangler secret put` antes de desplegar.
+
+### Corregido
+
+- `notify-teams.ts`: el payload pasa de texto plano (`{ "text": "..." }`) a una
+  tarjeta adaptable (Adaptive Card) envuelta en `attachments`, que es el formato
+  que exige la plantilla de Workflows "Enviar alertas de webhook a un canal".
+  El formato anterior no era compatible con esa plantilla.
 
 ---
 

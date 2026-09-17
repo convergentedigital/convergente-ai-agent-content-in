@@ -40,7 +40,7 @@ que alguien lo dispare a mano.
 | 3. Elegir tema y formato | ✅ Funcionando | Anti-repetición sobre las últimas 6 corridas |
 | 4. Redactar el copy | ✅ Funcionando | OpenAI, salida JSON estructurada |
 | 5. Guardar en SharePoint | ✅ Funcionando | Configurado y probado en local (`sharePointSaved: true`); falta subir los secretos a producción |
-| 6. Avisar en Teams | ⏸️ Pendiente | Falta la URL del webhook del canal |
+| 6. Avisar en Teams | ✅ Funcionando | Configurado y probado en local (`teamsNotified: true`) vía Workflows (tarjeta adaptable); falta subir el secreto a producción |
 
 > **Importante:** los pasos 5 y 6 están diseñados como *degradación suave*. Si no
 > hay credenciales, **no rompen el pipeline**: el copy se genera igual y queda
@@ -237,11 +237,12 @@ Local → `.dev.vars` · Producción → `npx wrangler secret put <NOMBRE>`
 | `MS_CLIENT_SECRET` | ✅ Configurado (solo local) | `save-sharepoint.ts` |
 | `SHAREPOINT_SITE_ID` | ✅ Configurado (solo local) | `save-sharepoint.ts` |
 | `SHAREPOINT_LIST_ID` | ✅ Configurado (solo local) | `save-sharepoint.ts` |
-| `TEAMS_WEBHOOK_URL` | ⏸️ Pendiente | `notify-teams.ts` |
+| `TEAMS_WEBHOOK_URL` | ✅ Configurado (solo local) | `notify-teams.ts` |
 
-Los cinco secretos de Microsoft están cargados en `.dev.vars` y verificados con una
-corrida local (`sharePointSaved: true`). Todavía no se subieron a producción con
-`wrangler secret put` — eso se hace en el paso de despliegue (sección 5).
+Los seis secretos están cargados en `.dev.vars` y verificados con una corrida
+local (`sharePointSaved: true`, `teamsNotified: true`). Todavía no se subieron a
+producción con `wrangler secret put` — eso se hace en el paso de despliegue
+(sección 5).
 
 Los cinco de SharePoint son **todo o nada**: si falta uno, `sharePointConfigured()`
 devuelve `false` y el paso se salta silenciosamente.
@@ -334,12 +335,13 @@ quedan los copys generados**. Guárdalos manualmente si los vas a usar.
 ### 8.2 Teams (paso 6)
 
 1. En el canal de Teams destino: **Workflows** → plantilla
-   *"Post to a channel when a webhook request is received"*.
-2. Copiar la URL generada.
+   *"Enviar alertas de webhook a un canal"* ("Post to a channel when a webhook
+   request is received").
+2. Copiar la URL generada ("Copiar vínculo de webhook").
 3. `npx wrangler secret put TEAMS_WEBHOOK_URL` y redesplegar.
 
-El mensaje se envía como `{ "text": "..." }` en formato Markdown simple. Si el
-flujo de Workflows espera un *Adaptive Card*, hay que ajustar el payload en
+El mensaje se envía como una **tarjeta adaptable (Adaptive Card)** envuelta en
+`attachments` — es el formato que espera esta plantilla de Workflows. Ver
 `src/pipeline/notify-teams.ts`.
 
 ---
